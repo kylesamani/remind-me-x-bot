@@ -216,6 +216,12 @@ class RemindMeBot:
             logger.debug(f"Mention {tweet_id} already processed, skipping")
             return None
         
+        # Skip mentions from the bot itself to prevent self-replies
+        if mention["author_id"] == str(self.bot_user_id):
+            logger.debug(f"Mention {tweet_id} is from the bot itself, skipping")
+            self.mark_mention_processed(tweet_id)
+            return None
+        
         # Parse the time from the mention
         target_time, duration_text = parse_reminder_time(mention["text"])
         
@@ -349,7 +355,7 @@ class RemindMeBot:
             # Compose the reminder message
             reply_text = (
                 f"⏰ Hey @{reminder.requester_username}, your reminder is here! "
-                f"You asked me to remind you about this {reminder.duration_text or 'a while'} ago."
+                f"You asked me to remind you about this {reminder.duration_text or 'a while'} ago. 🫡"
             )
             
             # Send the reply with rate limit retry
