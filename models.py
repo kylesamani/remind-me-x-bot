@@ -82,20 +82,51 @@ class BotState(Base):
         return f"<BotState {self.key}={self.value}>"
 
 
-# Database engine and session
-engine = create_engine(Config.DATABASE_URL, echo=False)
-SessionLocal = sessionmaker(bind=engine)
+# Database engine and session (lazy initialization)
+_engine = None
+_SessionLocal = None
 
 
-def init_db():
-    """Initialize the database tables."""
-    Base.metadata.create_all(engine)
-    print("Database tables created successfully.")
+def get_engine():
+    """Get or create the database engine (lazy initialization)."""
+    global _engine
+    if _engine is None:
+        _engine = create_engine(Config.DATABASE_URL, echo=False)
+    return _engine
+
+
+def get_session_factory():
+    """Get or create the session factory."""
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(bind=get_engine())
+    return _SessionLocal
+
+
+def init_db(max_retries=5, retry_delay=2):
+    """Initialize the database tables with retry logic."""
+    import time
+    
+    for attempt in range(max_retries):
+        try:
+            engine = get_engine()
+            Base.metadata.create_all(engine)
+            print("Database tables created successfully.")
+            return True
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Database connection failed (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"Failed to connect to database after {max_retries} attempts: {e}")
+                return False
+    return False
 
 
 def get_session():
     """Get a new database session."""
-    return SessionLocal()
+    return get_session_factory()()
 
 
 if __name__ == "__main__":
