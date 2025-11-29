@@ -28,9 +28,16 @@ class Config:
     elif DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     
-    # Polling interval (in seconds)
-    MENTION_CHECK_INTERVAL = int(os.getenv("MENTION_CHECK_INTERVAL", "60"))
-    REMINDER_CHECK_INTERVAL = int(os.getenv("REMINDER_CHECK_INTERVAL", "60"))
+    # Polling intervals (in seconds) - optimized for paid tiers
+    # Mention check: 30s allows ~120 checks/hour (well under 180/15min rate limit)
+    MENTION_CHECK_INTERVAL = int(os.getenv("MENTION_CHECK_INTERVAL", "30"))
+    # Reminder check: 30s for better precision on reminder delivery
+    REMINDER_CHECK_INTERVAL = int(os.getenv("REMINDER_CHECK_INTERVAL", "30"))
+    
+    # Rate limiting configuration
+    RATE_LIMIT_MAX_RETRIES = int(os.getenv("RATE_LIMIT_MAX_RETRIES", "5"))
+    RATE_LIMIT_BASE_DELAY = float(os.getenv("RATE_LIMIT_BASE_DELAY", "1.0"))  # seconds
+    RATE_LIMIT_MAX_DELAY = float(os.getenv("RATE_LIMIT_MAX_DELAY", "60.0"))  # seconds
     
     # Timezone
     TIMEZONE = os.getenv("TIMEZONE", "UTC")

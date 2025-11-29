@@ -8,7 +8,7 @@ from flask import Flask, jsonify, render_template_string
 
 from config import Config
 from models import init_db, get_session, Reminder
-from scheduler import start_scheduler, stop_scheduler
+from scheduler import start_scheduler, stop_scheduler, get_job_stats
 
 # Set up logging
 logging.basicConfig(
@@ -364,6 +364,26 @@ def api_stats():
         return jsonify(stats)
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scheduler")
+def api_scheduler():
+    """API endpoint for scheduler statistics."""
+    try:
+        scheduler_stats = get_job_stats()
+        return jsonify({
+            "scheduler": scheduler_stats,
+            "config": {
+                "mention_check_interval_seconds": Config.MENTION_CHECK_INTERVAL,
+                "reminder_check_interval_seconds": Config.REMINDER_CHECK_INTERVAL,
+                "rate_limit_max_retries": Config.RATE_LIMIT_MAX_RETRIES,
+                "rate_limit_base_delay": Config.RATE_LIMIT_BASE_DELAY,
+                "rate_limit_max_delay": Config.RATE_LIMIT_MAX_DELAY
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting scheduler stats: {e}")
         return jsonify({"error": str(e)}), 500
 
 

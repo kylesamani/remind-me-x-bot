@@ -1,8 +1,11 @@
 """Core bot logic for interacting with the X API."""
 
 import logging
+import time
+import random
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Callable, TypeVar, Any
+from functools import wraps
 
 import tweepy
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +20,58 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Type variable for generic return type
+T = TypeVar('T')
+
+
+def with_rate_limit_retry(func: Callable[..., T]) -> Callable[..., T]:
+    """
+    Decorator that adds exponential backoff retry logic for rate-limited API calls.
+    
+    Handles Twitter rate limit errors (429) and retries with exponential backoff.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs) -> T:
+        max_retries = Config.RATE_LIMIT_MAX_RETRIES
+        base_delay = Config.RATE_LIMIT_BASE_DELAY
+        max_delay = Config.RATE_LIMIT_MAX_DELAY
+        
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except tweepy.TooManyRequests as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    # Calculate delay with exponential backoff + jitter
+                    delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+                    logger.warning(
+                        f"Rate limited on {func.__name__}. "
+                        f"Retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(f"Rate limit exceeded after {max_retries} retries on {func.__name__}")
+            except tweepy.TwitterServerError as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+                    logger.warning(
+                        f"Twitter server error on {func.__name__}: {e}. "
+                        f"Retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(f"Twitter server error after {max_retries} retries on {func.__name__}")
+        
+        # If we've exhausted all retries, raise the last exception
+        if last_exception:
+            raise last_exception
+        return None  # Should never reach here
+    
+    return wrapper
 
 
 class RemindMeBot:
@@ -90,22 +145,27 @@ class RemindMeBot:
         finally:
             session.close()
     
+    @with_rate_limit_retry
+    def _fetch_mentions_api(self, since_id: Optional[str]):
+        """Internal method to call the mentions API with retry logic."""
+        return self.client.get_users_mentions(
+            id=self.bot_user_id,
+            since_id=since_id,
+            max_results=100,
+            expansions=["author_id", "in_reply_to_user_id", "referenced_tweets.id"],
+            tweet_fields=["created_at", "conversation_id", "in_reply_to_user_id", "text"],
+            user_fields=["username"]
+        )
+    
     def fetch_mentions(self) -> List[dict]:
-        """Fetch recent mentions of the bot."""
+        """Fetch recent mentions of the bot with rate limit handling."""
         mentions = []
         
         try:
             since_id = self.get_last_mention_id()
             
-            # Fetch mentions using the v2 API
-            response = self.client.get_users_mentions(
-                id=self.bot_user_id,
-                since_id=since_id,
-                max_results=100,
-                expansions=["author_id", "in_reply_to_user_id", "referenced_tweets.id"],
-                tweet_fields=["created_at", "conversation_id", "in_reply_to_user_id", "text"],
-                user_fields=["username"]
-            )
+            # Fetch mentions using the v2 API with retry logic
+            response = self._fetch_mentions_api(since_id)
             
             if response.data:
                 # Build a map of user IDs to usernames
@@ -211,6 +271,14 @@ class RemindMeBot:
         finally:
             session.close()
     
+    @with_rate_limit_retry
+    def _create_tweet_api(self, text: str, in_reply_to_tweet_id: str):
+        """Internal method to create a tweet with retry logic."""
+        return self.client.create_tweet(
+            text=text,
+            in_reply_to_tweet_id=in_reply_to_tweet_id
+        )
+    
     def _reply_with_confirmation(self, mention: dict, target_time: datetime, duration_text: str):
         """Reply to confirm the reminder was set."""
         try:
@@ -223,10 +291,7 @@ class RemindMeBot:
                 f"(around {formatted_time})."
             )
             
-            self.client.create_tweet(
-                text=reply_text,
-                in_reply_to_tweet_id=mention["id"]
-            )
+            self._create_tweet_api(reply_text, mention["id"])
             logger.info(f"Sent confirmation reply to @{mention['author_username']}")
             
         except tweepy.TweepyException as e:
@@ -243,10 +308,7 @@ class RemindMeBot:
                 f"• @{self.bot_username} 1 year"
             )
             
-            self.client.create_tweet(
-                text=reply_text,
-                in_reply_to_tweet_id=mention["id"]
-            )
+            self._create_tweet_api(reply_text, mention["id"])
             logger.info(f"Sent error reply to @{mention['author_username']}")
             
         except tweepy.TweepyException as e:
@@ -274,7 +336,7 @@ class RemindMeBot:
             session.close()
     
     def send_reminder(self, reminder: Reminder) -> bool:
-        """Send a reminder reply and update the database."""
+        """Send a reminder reply and update the database with rate limit handling."""
         session = get_session()
         try:
             # Refresh the reminder from the database
@@ -290,16 +352,13 @@ class RemindMeBot:
                 f"You asked me to remind you about this {reminder.duration_text or 'a while'} ago."
             )
             
-            # Send the reply
-            response = self.client.create_tweet(
-                text=reply_text,
-                in_reply_to_tweet_id=reminder.reply_to_tweet_id
-            )
+            # Send the reply with rate limit retry
+            response = self._create_tweet_api(reply_text, reminder.reply_to_tweet_id)
             
             # Update the reminder
             reminder.is_sent = True
             reminder.sent_at = datetime.utcnow()
-            if response.data:
+            if response and response.data:
                 reminder.reply_tweet_id = str(response.data["id"])
             
             session.commit()

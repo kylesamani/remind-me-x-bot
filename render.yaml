@@ -25,10 +25,18 @@ services:
       # Bot configuration
       - key: BOT_USERNAME
         value: RemindMeXplz
+      # Optimized intervals for paid tiers (30s each)
       - key: MENTION_CHECK_INTERVAL
-        value: "60"
+        value: "30"
       - key: REMINDER_CHECK_INTERVAL
-        value: "60"
+        value: "30"
+      # Rate limiting configuration
+      - key: RATE_LIMIT_MAX_RETRIES
+        value: "5"
+      - key: RATE_LIMIT_BASE_DELAY
+        value: "1.0"
+      - key: RATE_LIMIT_MAX_DELAY
+        value: "60.0"
       - key: TIMEZONE
         value: UTC
       # Database URL (automatically set by Render when using their PostgreSQL)
