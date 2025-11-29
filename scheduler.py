@@ -14,22 +14,22 @@ scheduler = None
 
 def check_mentions_job():
     """Job to check for new mentions."""
-    from bot import get_bot
     try:
+        from bot import get_bot
         bot = get_bot()
         bot.check_mentions()
     except Exception as e:
-        logger.error(f"Error in check_mentions_job: {e}")
+        logger.error(f"Error in check_mentions_job: {e}", exc_info=True)
 
 
 def process_reminders_job():
     """Job to process due reminders."""
-    from bot import get_bot
     try:
+        from bot import get_bot
         bot = get_bot()
         bot.process_due_reminders()
     except Exception as e:
-        logger.error(f"Error in process_reminders_job: {e}")
+        logger.error(f"Error in process_reminders_job: {e}", exc_info=True)
 
 
 def start_scheduler():

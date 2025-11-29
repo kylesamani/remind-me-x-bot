@@ -372,16 +372,27 @@ def create_app():
     # Initialize database
     init_db()
     
-    # Start the scheduler when the app starts
-    start_scheduler()
-    
-    # Run initial checks
+    # Check if we have valid credentials before starting scheduler
     try:
-        from bot import get_bot
-        bot = get_bot()
-        logger.info(f"Bot initialized as @{bot.bot_username}")
-    except Exception as e:
-        logger.error(f"Error initializing bot: {e}")
+        Config.validate()
+        credentials_valid = True
+        logger.info("X API credentials validated successfully")
+    except ValueError as e:
+        credentials_valid = False
+        logger.warning(f"X API credentials not configured: {e}")
+        logger.warning("Bot will not run until credentials are added to environment variables")
+    
+    # Only start the scheduler if we have valid credentials
+    if credentials_valid:
+        start_scheduler()
+        
+        # Run initial checks
+        try:
+            from bot import get_bot
+            bot = get_bot()
+            logger.info(f"Bot initialized as @{bot.bot_username}")
+        except Exception as e:
+            logger.error(f"Error initializing bot: {e}")
     
     return app
 
